@@ -15,7 +15,7 @@ using v8::Exception;
 using v8::Boolean;
 using namespace node;
 
-// Perform GCM mode AES-128 encryption using the provided key, IV, plaintext
+// Perform CCM mode AES-256 encryption using the provided key, IV, plaintext
 // and auth_data buffers, and return an object containing "ciphertext"
 // and "auth_tag" buffers.
 
@@ -46,11 +46,11 @@ void CcmEncrypt(const FunctionCallbackInfo<Value>& args) {
   int auth_tag_len = args[4]->NumberValue();
   unsigned char *auth_tag = new unsigned char[auth_tag_len];
 
-  // Init OpenSSL interace with 128-bit AES GCM cipher and give it the
+  // Init OpenSSL interace with 256-bit AES CCM cipher and give it the
   // key and IV
   int outl;
   EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
-  EVP_EncryptInit_ex(ctx, EVP_aes_128_ccm(), NULL, NULL, NULL);
+  EVP_EncryptInit_ex(ctx, EVP_aes_256_ccm(), NULL, NULL, NULL);
   
   size_t iv_len = Buffer::Length(args[1]);
   
@@ -96,7 +96,7 @@ void CcmEncrypt(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(return_obj);
 }
 
-// Perform GCM mode AES-128 decryption using the provided key, IV, ciphertext,
+// Perform CCM mode AES-256 decryption using the provided key, IV, ciphertext,
 // auth_data and auth_tag buffers, and return an object containing a "plaintext"
 // buffer and an "auth_ok" boolean.
 
@@ -125,11 +125,11 @@ void CcmDecrypt(const FunctionCallbackInfo<Value>& args) {
   int aad_len = Buffer::Length(args[3]);
   unsigned char *plaintext = new unsigned char[plaintext_len];
 
-  // Init OpenSSL interace with 128-bit AES GCM cipher and give it the
+  // Init OpenSSL interace with 256-bit AES CCM cipher and give it the
   // key and IV
   int outl;
   EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
-  EVP_DecryptInit_ex(ctx, EVP_aes_128_ccm(), NULL, NULL, NULL);
+  EVP_DecryptInit_ex(ctx, EVP_aes_256_ccm(), NULL, NULL, NULL);
 
   size_t iv_len = Buffer::Length(args[1]);
   EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_IVLEN, iv_len, 0);
