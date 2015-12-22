@@ -97,8 +97,8 @@ void CcmEncrypt(const FunctionCallbackInfo<Value>& args) {
 }
 
 // Perform CCM mode AES-256 decryption using the provided key, IV, ciphertext,
-// auth_data and auth_tag buffers, and return an object containing a "plaintext"
-// buffer and an "auth_ok" boolean.
+// auth_data and auth_tag buffers, and return an object containing a "plainText"
+// buffer and an "authOk" boolean.
 
 void CcmDecrypt(const FunctionCallbackInfo<Value>& args) {
   Isolate* isolate = args.GetIsolate();
@@ -164,8 +164,8 @@ void CcmDecrypt(const FunctionCallbackInfo<Value>& args) {
   // We strip padding from the plaintext
   MaybeLocal<Object> plaintext_buf = Buffer::New(isolate, (char*)plaintext, ciphertext_len);
   Local<Object> return_obj = Object::New(isolate);
-  return_obj->Set(String::NewFromUtf8(isolate, "plaintext"), plaintext_buf.FromMaybe(Local<Object>()));
-  return_obj->Set(String::NewFromUtf8(isolate, "auth_ok"), Boolean::New(isolate, auth_ok));
+  return_obj->Set(String::NewFromUtf8(isolate, "plainText"), plaintext_buf.FromMaybe(Local<Object>()));
+  return_obj->Set(String::NewFromUtf8(isolate, "authOk"), Boolean::New(isolate, auth_ok));
 
   // Return it
   args.GetReturnValue().Set(return_obj);
