@@ -89,8 +89,8 @@ void CcmEncrypt(const FunctionCallbackInfo<Value>& args) {
   MaybeLocal<Object> ciphertext_buf = Buffer::New(isolate, (char*)ciphertext, plaintext_len);
   MaybeLocal<Object> auth_tag_buf = Buffer::New(isolate, (char*)auth_tag, auth_tag_len);
   Local<Object> return_obj = Object::New(isolate);
-  return_obj->Set(String::NewFromUtf8(isolate, "ciphertext"), ciphertext_buf.FromMaybe(Local<Object>()));
-  return_obj->Set(String::NewFromUtf8(isolate, "auth_tag"), auth_tag_buf.FromMaybe(Local<Object>()));
+  return_obj->Set(String::NewFromUtf8(isolate, "cipherText"), ciphertext_buf.FromMaybe(Local<Object>()));
+  return_obj->Set(String::NewFromUtf8(isolate, "authTag"), auth_tag_buf.FromMaybe(Local<Object>()));
 
   // Return it
   args.GetReturnValue().Set(return_obj);
