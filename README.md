@@ -4,7 +4,7 @@
 
 ## Installation
 
-`npm install node-aes-ccm`
+`npm install --save https://github.com/dwimberger/node-aes-ccm`
 
 ## Requirements
 
@@ -12,27 +12,27 @@
 
 ## encrypt
 
-`encrypt(key, iv, plaintext, aad, auth_tag_length)`
+`encrypt(key, iv, plaintext, aad, authTagLength)`
 
 `key`, `iv`, `plaintext`, and `aad` are all `Buffer` objects. `encrypt` will return an object like the following:
 
 ```
 {
-  ciphertext: Buffer,
-  auth_tag: Buffer
+  cipherText: Buffer,
+  authTag: Buffer
 }
 ```
 
 ## decrypt
 
-`decrypt(key, iv, ciphertext, aad, auth_tag)`
+`decrypt(key, iv, ciphertext, aad, authTag)`
 
-`key`, `iv`, `plaintext`, `aad`, and `auth_tag` are all `Buffer` objects. `decrypt` will return an object like the following:
+`key`, `iv`, `plaintext`, `aad`, and `authTag` are all `Buffer` objects. `decrypt` will return an object like the following:
 
 ```
 {
-  plaintext: Buffer,
-  auth_ok: Boolean
+  plainText: Buffer,
+  authOk: Boolean
 }
 ```
 
