@@ -6,7 +6,8 @@
         "src/node-aes-ccm.cc"
       ],
       "include_dirs": [
-        "<(node_root_dir)/deps/openssl/openssl/include"
+        "<(node_root_dir)/deps/openssl/openssl/include",
+         "<!(node -e \"require('nan')\")"
       ]
     }
   ]

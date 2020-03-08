@@ -53,10 +53,10 @@ for (var i in TEST_CASES) {
   var test = TEST_CASES[i];
   //console.log(test);
   var res = ccm.encrypt(
-		new Buffer(test.key, 'hex'),
-		new Buffer(test.iv, 'hex'),
-		new Buffer(test.plain, 'hex'),
-		new Buffer(test.aad, 'hex'), test.tag.length / 2
+		Buffer.from(test.key, 'hex'),
+		Buffer.from(test.iv, 'hex'),
+		Buffer.from(test.plain, 'hex'),
+		Buffer.from(test.aad, 'hex'), test.tag.length / 2
   );
   //console.log(res);
 
@@ -66,11 +66,11 @@ for (var i in TEST_CASES) {
 	}
 
 	var dres = ccm.decrypt(
-		new Buffer(test.key, 'hex'),
-		new Buffer(test.iv, 'hex'),
-		new Buffer(test.ct, 'hex'),
-		new Buffer(test.aad, 'hex'),
-		new Buffer(test.tag, 'hex')
+		Buffer.from(test.key, 'hex'),
+		Buffer.from(test.iv, 'hex'),
+		Buffer.from(test.ct, 'hex'),
+		Buffer.from(test.aad, 'hex'),
+		Buffer.from(test.tag, 'hex')
 	);
 	//console.log(dres);
 

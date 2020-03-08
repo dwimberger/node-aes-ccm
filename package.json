@@ -26,6 +26,7 @@
   },
   "homepage": "https://github.com/dwimberger/node-aes-ccm#readme",
   "dependencies": {
+    "nan": "^2.14.0",
     "node-gyp-install": "^2.0.1"
   },
   "engines": {

@@ -1,181 +1,253 @@
 #include <node.h>
-#include <node_buffer.h>
+#include <nan.h>
+#include <node_buffer.h> // TODO: why do we need this?
 #include <openssl/evp.h>
 
-namespace node_aes_ccm {
+// see https://wiki.openssl.org/index.php/EVP_Authenticated_Encryption_and_Decryption
+// for details on the implementation
 
-using v8::FunctionCallbackInfo;
-using v8::Isolate;
-using v8::Local;
-using v8::MaybeLocal;
-using v8::Object;
-using v8::String;
-using v8::Value;
-using v8::Exception;
-using v8::Boolean;
+using namespace v8;
 using namespace node;
-
-// Perform CCM mode AES-256 encryption using the provided key, IV, plaintext
+	
+// Perform CCM mode AES encryption using the provided key, IV, plaintext
 // and auth_data buffers, and return an object containing "ciphertext"
 // and "auth_tag" buffers.
+// The key length determines the encryption bit level used.
+NAN_METHOD(CcmEncrypt) {
+	Nan::HandleScope scope;
+	// check arguments
+	if (info.Length() < 5 || 
+		!Buffer::HasInstance(info[0]) || // key
+		!Buffer::HasInstance(info[1]) || // iv
+		!Buffer::HasInstance(info[2]) || // plaintext
+		!(info[3]->IsUndefined() || info[3]->IsNull() || Buffer::HasInstance(info[3])) || // auth_data, optional
+		!info[4]->IsNumber() // auth tag length
+	) {
+		Nan::ThrowError(
+			"Not enough (or wrong) arguments specified. Required: "
+			"key (Buffer), iv (Buffer), plaintext (Buffer), auth_data (Buffer | NULL), auth tag length (int)."
+		);
+		return;
+	}
 
-void CcmEncrypt(const FunctionCallbackInfo<Value>& args) {
-  Isolate* isolate = args.GetIsolate();
+	// parse key and assign a cipher
+	const EVP_CIPHER *cipher_type = NULL;
+	unsigned char *key = (unsigned char *)Buffer::Data(info[0]);
+	size_t key_len = Buffer::Length(info[0]);
+	switch (key_len) {
+		case 16:
+			cipher_type = EVP_aes_128_ccm();
+			break;
+		case 24:
+			cipher_type = EVP_aes_192_ccm();
+			break;
+		case 32:
+			cipher_type = EVP_aes_256_ccm();
+			break;
+		default:
+			Nan::ThrowError("Invalid key length specified. Allowed are 128, 192 and 256 bits.");
+			return;
+	}
 
-  // We want 5 arguments
-  // key
-  // iv
-  // plaintext
-  // aad
-  // auth tag length
-  if (args.Length() < 4 || !Buffer::HasInstance(args[0]) ||
-      !Buffer::HasInstance(args[1]) || !Buffer::HasInstance(args[2]) ||
-      !Buffer::HasInstance(args[3]) || !args[4]->IsNumber()) {
-    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "encrypt requires a key Buffer, a " \
-                      "IV Buffer, a plaintext Buffer, an auth_data " \
-                      "Buffer parameter, and the length of the auth tag")));
-    return;
-  }
+	// parse iv and plaintext
+	unsigned char *iv = (unsigned char *)Buffer::Data(info[1]);
+	const size_t iv_len = Buffer::Length(info[1]);
+	unsigned char *plaintext = (unsigned char *)Buffer::Data(info[2]);
+	const size_t plaintext_len = Buffer::Length(info[2]);
+	// Make a buffer for the ciphertext that is the same size as the
+	// plaintext, but padded to 16 byte increments
+	size_t ciphertext_len = (((plaintext_len - 1) / key_len) + 1) * key_len;
+	unsigned char *ciphertext = new unsigned char[ciphertext_len];
+	// parse auth data (if given)
+	const bool hasAuthData = Buffer::HasInstance(info[3]);
+	unsigned char *aad;
+	size_t aad_len = 0;
+	if (hasAuthData) {
+		aad = (unsigned char *)Buffer::Data(info[3]);
+		aad_len = Buffer::Length(info[3]);
+	}
+	// Make a authentication tag buffer
+	const int auth_tag_len = Nan::To<int32_t>(info[4]).FromJust();
+ // info[4]->Int32Value(context);
+	unsigned char *auth_tag = new unsigned char[auth_tag_len];
+	
+		
+	// ==================
 
-  // Make a buffer for the ciphertext that is the same size as the
-  // plaintext, but padded to 16 byte increments
-  size_t plaintext_len = Buffer::Length(args[2]);
-  size_t ciphertext_len = (((plaintext_len - 1) / 16) + 1) * 16;
-  unsigned char *ciphertext = new unsigned char[ciphertext_len];
-  // Make a authentication tag buffer
-  int auth_tag_len = args[4]->NumberValue();
-  unsigned char *auth_tag = new unsigned char[auth_tag_len];
+	// Now do the encryption
 
-  // Init OpenSSL interace with 256-bit AES CCM cipher and give it the
-  // key and IV
-  int outl;
-  EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
-  EVP_EncryptInit_ex(ctx, EVP_aes_256_ccm(), NULL, NULL, NULL);
-  
-  size_t iv_len = Buffer::Length(args[1]);
-  
-  // set iv and auth tag length
-  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_IVLEN, iv_len, NULL);
-  // EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_L, 3, NULL);
-  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_TAG, auth_tag_len, NULL);
+	// create the context
+	EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+	// initialize the encryption operation with the chosen cipher
+	EVP_EncryptInit_ex(ctx, cipher_type, NULL, NULL, NULL);
 
-  EVP_EncryptInit_ex(ctx, NULL, NULL,
-                    (unsigned char *)Buffer::Data(args[0]),
-                    (unsigned char *)Buffer::Data(args[1]));
+	// set iv and auth tag length
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_IVLEN, iv_len, NULL);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_TAG, auth_tag_len, NULL);
 
-  int aad_len = Buffer::Length(args[3]);
-  EVP_EncryptUpdate(ctx, NULL, &outl, NULL, plaintext_len);
-  // Pass additional authenticated data
-  // There is some extra complication here because Buffer::Data seems to
-  // return NULL for empty buffers, and NULL makes update not work as we
-  // expect it to.  So we force a valid non-NULL pointer for empty buffers.
+	// provide the key and iv
+	EVP_EncryptInit_ex(ctx, NULL, NULL, key, iv);
 
-  EVP_EncryptUpdate(ctx, NULL, &outl, aad_len ?
-                    (unsigned char *)Buffer::Data(args[3]) : auth_tag,
-                    aad_len);
-  // Encrypt plaintext
-  EVP_EncryptUpdate(ctx, ciphertext, &outl,
-                    (unsigned char *)Buffer::Data(args[2]),
-                    plaintext_len);
-  // Finalize
-  EVP_EncryptFinal_ex(ctx, ciphertext + outl, &outl);
-  // Get the authentication tag
-  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_GET_TAG, auth_tag_len, auth_tag);
-  // Free the OpenSSL interface structure
-  EVP_CIPHER_CTX_free(ctx);
+	int outl; // output length
+	
+	// if we have additional authenticated data,
+	// provide it and the the plaintext length
+	if (hasAuthData) {
+		EVP_EncryptUpdate(ctx, NULL, &outl, NULL, plaintext_len);
+		EVP_EncryptUpdate(ctx, NULL, &outl, aad, aad_len);
+	}
 
-  // Create the return buffers and object
-  // We strip padding from the ciphertext
-  MaybeLocal<Object> ciphertext_buf = Buffer::New(isolate, (char*)ciphertext, plaintext_len);
-  MaybeLocal<Object> auth_tag_buf = Buffer::New(isolate, (char*)auth_tag, auth_tag_len);
-  Local<Object> return_obj = Object::New(isolate);
-  return_obj->Set(String::NewFromUtf8(isolate, "cipherText"), ciphertext_buf.FromMaybe(Local<Object>()));
-  return_obj->Set(String::NewFromUtf8(isolate, "authTag"), auth_tag_buf.FromMaybe(Local<Object>()));
+	// Encrypt plaintext
+	EVP_EncryptUpdate(ctx, ciphertext, &outl, plaintext, plaintext_len);
+	ciphertext_len = outl;
 
-  // Return it
-  args.GetReturnValue().Set(return_obj);
+	// Finalize the encryption
+	EVP_EncryptFinal_ex(ctx, ciphertext + outl, &outl);
+	ciphertext_len += outl;
+
+	// Get the authentication tag
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_GET_TAG, auth_tag_len, auth_tag);
+
+	// Clean up
+	EVP_CIPHER_CTX_free(ctx);
+
+	// ===================================
+
+	// Create the return buffers and object
+	// We strip padding from the ciphertext
+	Nan::MaybeLocal<Object> ciphertext_buf = Nan::CopyBuffer((char*)ciphertext, (uint32_t)ciphertext_len);
+	Nan::MaybeLocal<Object> auth_tag_buf = Nan::CopyBuffer((char*)auth_tag, auth_tag_len);
+	Local<Object> return_obj = Nan::New<Object>();
+	Nan::Set(return_obj, Nan::New<String>("cipherText").ToLocalChecked(), ciphertext_buf.ToLocalChecked());
+	Nan::Set(return_obj, Nan::New<String>("authTag").ToLocalChecked(), auth_tag_buf.ToLocalChecked());
+
+	// Return it
+	info.GetReturnValue().Set(return_obj);
 }
 
-// Perform CCM mode AES-256 decryption using the provided key, IV, ciphertext,
-// auth_data and auth_tag buffers, and return an object containing a "plainText"
-// buffer and an "authOk" boolean.
+// Perform CCM mode AES decryption using the provided key, IV, ciphertext,
+// auth_data and auth_tag buffers, and return an object containing a "plaintext"
+// buffer and an "auth_ok" boolean.
+// The key length determines the encryption bit level used.
 
-void CcmDecrypt(const FunctionCallbackInfo<Value>& args) {
-  Isolate* isolate = args.GetIsolate();
+NAN_METHOD(CcmDecrypt) {
+	Nan::HandleScope scope;
 
-  // We want 5 buffer arguments
-  // key
-  // IV
-  // ciphertext
-  // aad
-  // auth_tag
-  if (args.Length() < 5 || !Buffer::HasInstance(args[0]) ||
-      !Buffer::HasInstance(args[1]) || !Buffer::HasInstance(args[2]) ||
-      !Buffer::HasInstance(args[3]) || !Buffer::HasInstance(args[4])
-     ) {
-    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "decrypt requires a key Buffer, a " \
-                      "IV Buffer, a ciphertext Buffer, an auth_data " \
-                      "Buffer and an auth_tag Buffer parameter")));
-  }
+	// check arguments
+	if (info.Length() < 5 || 
+		!Buffer::HasInstance(info[0]) || // key
+		!Buffer::HasInstance(info[1]) || // iv
+		!Buffer::HasInstance(info[2]) || // ciphertext
+		!(info[3]->IsUndefined() || info[3]->IsNull() || Buffer::HasInstance(info[3])) || // auth_data, optional
+		!Buffer::HasInstance(info[4]) // auth tag
+	) {
+		Nan::ThrowError(
+			"Not enough (or wrong) arguments specified. Required: "
+			"key (Buffer), iv (Buffer), ciphertext (Buffer), auth_data (Buffer | NULL), auth tag (Buffer)."
+		);
+		return;
+	}
 
-  // Make a buffer for the plaintext that is the same size as the
-  // ciphertext, but padded to 16 byte increments
-  size_t ciphertext_len = Buffer::Length(args[2]);
-  size_t plaintext_len = (((ciphertext_len - 1) / 16) + 1) * 16;
-  int aad_len = Buffer::Length(args[3]);
-  unsigned char *plaintext = new unsigned char[plaintext_len];
+	// parse key and assign a cipher
+	const EVP_CIPHER *cipher_type = NULL;
+	unsigned char *key = (unsigned char *)Buffer::Data(info[0]);
+	size_t key_len = Buffer::Length(info[0]);
+	switch (key_len) {
+		case 16:
+			cipher_type = EVP_aes_128_ccm();
+			break;
+		case 24:
+			cipher_type = EVP_aes_192_ccm();
+			break;
+		case 32:
+			cipher_type = EVP_aes_256_ccm();
+			break;
+		default:
+			Nan::ThrowError("Invalid key length specified. Allowed are 128, 192 and 256 bits.");
+			return;
+	}
 
-  // Init OpenSSL interace with 256-bit AES CCM cipher and give it the
-  // key and IV
-  int outl;
-  EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
-  EVP_DecryptInit_ex(ctx, EVP_aes_256_ccm(), NULL, NULL, NULL);
+	// parse iv and ciphertext
+	unsigned char *iv = (unsigned char *)Buffer::Data(info[1]);
+	const size_t iv_len = Buffer::Length(info[1]);
+	unsigned char *ciphertext = (unsigned char *)Buffer::Data(info[2]);
+	const size_t ciphertext_len = Buffer::Length(info[2]);
+	// Make a buffer for the plaintext that is the same size as the
+	// ciphertext, but padded to 16 byte increments
+	size_t plaintext_len = (((ciphertext_len - 1) / 16) + 1) * 16;
+	unsigned char *plaintext = new unsigned char[plaintext_len];
+	// parse auth data (if given)
+	const bool hasAuthData = Buffer::HasInstance(info[3]);
+	unsigned char *aad;
+	size_t aad_len = 0;
+	if (hasAuthData) {
+		aad = (unsigned char *)Buffer::Data(info[3]);
+		aad_len = Buffer::Length(info[3]);
+	}
+	// parse auth_tag
+	unsigned char *auth_tag = (unsigned char *)Buffer::Data(info[4]);
+	const size_t auth_tag_len = Buffer::Length(info[4]);
 
-  size_t iv_len = Buffer::Length(args[1]);
-  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_IVLEN, iv_len, 0);
 
-  // Set the input reference authentication tag
-  size_t auth_tag_len = Buffer::Length(args[4]);
-  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_TAG, auth_tag_len,
-                    Buffer::Data(args[4]));
-  // Example showed we needed to do init again
-  EVP_DecryptInit_ex(ctx, NULL, NULL,
-                    (unsigned char *)Buffer::Data(args[0]),
-                    (unsigned char *)Buffer::Data(args[1]));
+	// ==================
 
-  EVP_DecryptUpdate(ctx, NULL, &outl, NULL, ciphertext_len);
-  // Pass additional authenticated data
-  // There is some extra complication here because Buffer::Data seems to
-  // return NULL for empty buffers, and NULL makes update not work as we
-  // expect it to.  So we force a valid non-NULL pointer for empty buffers.
-  EVP_DecryptUpdate(ctx, NULL, &outl, Buffer::Length(args[3]) ?
-                    (unsigned char *)Buffer::Data(args[3]) : plaintext,
-                    aad_len);
-  // Decrypt ciphertext
-  bool auth_ok = EVP_DecryptUpdate(ctx, plaintext, &outl,
-                    (unsigned char *)Buffer::Data(args[2]),
-                    ciphertext_len);
-  // Finalize
-  //bool auth_ok = EVP_DecryptFinal_ex(ctx, plaintext + outl, &outl);
-  // Free the OpenSSL interface structure
-  EVP_CIPHER_CTX_free(ctx);
+	// Now do the decryption
 
-  // Create the return buffer and object
-  // We strip padding from the plaintext
-  MaybeLocal<Object> plaintext_buf = Buffer::New(isolate, (char*)plaintext, ciphertext_len);
-  Local<Object> return_obj = Object::New(isolate);
-  return_obj->Set(String::NewFromUtf8(isolate, "plainText"), plaintext_buf.FromMaybe(Local<Object>()));
-  return_obj->Set(String::NewFromUtf8(isolate, "authOk"), Boolean::New(isolate, auth_ok));
+	// create the context
+	EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+	// initialize the decryption operation with the chosen cipher
+	EVP_DecryptInit_ex(ctx, cipher_type, NULL, NULL, NULL);
 
-  // Return it
-  args.GetReturnValue().Set(return_obj);
+	// Set the IV length
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_IVLEN, iv_len, NULL);
+
+	// Set the expected authentication tag
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_TAG, auth_tag_len, auth_tag);
+
+	// Provide key and iv to OpenSSL
+	EVP_DecryptInit_ex(ctx, NULL, NULL, key, iv);
+
+	int outl; // output length
+	
+	// if we have additional authenticated data,
+	// provide it and the the ciphertext length
+	if (hasAuthData) {
+		EVP_DecryptUpdate(ctx, NULL, &outl, NULL, ciphertext_len);
+		EVP_DecryptUpdate(ctx, NULL, &outl, aad, aad_len);
+	}
+	
+	// Decrypt ciphertext
+	bool auth_ok = EVP_DecryptUpdate(ctx, plaintext, &outl, ciphertext, ciphertext_len);
+	plaintext_len = outl;
+
+	// Clean up
+	EVP_CIPHER_CTX_free(ctx);
+
+	// ==================
+
+	// Create the return buffer and object
+	// We strip padding from the plaintext
+	Nan::MaybeLocal<Object> plaintext_buf = Nan::CopyBuffer((char*)plaintext, (uint32_t)plaintext_len);
+	Local<Object> return_obj = Nan::New<Object>();
+	Nan::Set(return_obj, Nan::New<String>("plainText").ToLocalChecked(), plaintext_buf.ToLocalChecked());
+	Nan::Set(return_obj, Nan::New<String>("authOk").ToLocalChecked(), Nan::New<Boolean>(auth_ok));
+
+	// Return it
+	info.GetReturnValue().Set(return_obj);
 }
 
-void init(Local<Object> exports) {
-  NODE_SET_METHOD(exports, "encrypt", CcmEncrypt);
-  NODE_SET_METHOD(exports, "decrypt", CcmDecrypt);
+
+// Module init function
+
+NAN_MODULE_INIT(InitAll) {
+	Nan::Set(target, 
+        Nan::New<String>("encrypt").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<FunctionTemplate>(CcmEncrypt)).ToLocalChecked()
+    );
+	Nan::Set(target, 
+        Nan::New<String>("decrypt").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<FunctionTemplate>(CcmDecrypt)).ToLocalChecked()
+    );
 }
 
-NODE_MODULE(node_aes_ccm, init)
-
-} // namespace node_aes_ccm
+NODE_MODULE(node_aes_ccm, InitAll);
