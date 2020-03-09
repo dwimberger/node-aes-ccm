@@ -8,6 +8,9 @@
       "include_dirs": [
         "<(node_root_dir)/deps/openssl/openssl/include",
          "<!(node -e \"require('nan')\")"
+      ],
+      "libraries": [
+        "-L/usr/lib", "-lssl"
       ]
     }
   ]

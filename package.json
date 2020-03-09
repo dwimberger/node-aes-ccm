@@ -6,6 +6,7 @@
   "scripts": {
     "configure": "node-gyp configure",
     "build": "node-gyp build",
+    "rebuild": "node-gyp rebuild",
     "test": "node test/test.js",
     "preinstall": "true",
     "install": "node-gyp-install && node-gyp rebuild"
